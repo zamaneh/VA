@@ -1,9 +1,302 @@
 SELECT 
-	SUM(wrE19."Debit Amount") AS "Debit Amount",
-	SUM(wrE19."Credit Amount") AS "credit Amount",
-	MAX(wrE19."General Ledger Key") AS "General Ledger Key"
-FROM (with all_fiscal_accounts as ( select gl.account_key          account_key, gl.organization_key     org_key, fm.fiscal_month_key     fiscal_month_key, fm.fiscal_year_key      fiscal_year_key, fm.begin_date           begin_date, fm.end_date             end_date, 0                       amount, a.type					acc_type, gl.transaction_currency transaction_currency, gl.local_currency       local_currency from (select distinct account_key, organization_key, transaction_currency, local_currency from general_ledger) gl cross join fiscal_month fm join account a on a.account_key = gl.account_key where fm.begin_date >= current_date - INTERVAL '3' year - INTERVAL '1' year ), re_accounts_cte as( select gl.account_key          account_key, gl.organization_key     org_key, gl.fiscal_month_key     fiscal_month_key, max(fm.fiscal_year_key)      fiscal_year_key, max(fm.begin_date)           begin_date, max(fm.end_date)             end_date, sum(case    when a.type = 'E' then (gl.debit_amount - gl.credit_amount) when a.type = 'R' then (gl.credit_amount - gl.debit_amount) else 0 end) amount, sum(case    when a.type = 'E' then (gl.local_debit_amount - gl.local_credit_amount) when a.type = 'R' then (gl.local_credit_amount - gl.local_debit_amount) else 0 end)	     local_amount, max(gl.transaction_currency) transaction_currency, max(gl.local_currency)       local_currency, max(a.type) 				 acc_type from general_ledger gl join fiscal_month   fm      on fm.fiscal_month_key = gl.fiscal_month_key join account        a       on a.account_key = gl.account_key where a.type in ('E','R') group by gl.account_key, gl.organization_key, gl.fiscal_month_key  union all  select afa.account_key          account_key, afa.org_key              org_key, afa.fiscal_month_key     fiscal_month_key, afa.fiscal_year_key      fiscal_year_key, afa.begin_date           begin_date, afa.end_date             end_date, 0                        amount, 0                        local_amount, afa.transaction_currency transaction_currency, afa.local_currency       local_currency, afa.acc_type 				 acc_type from all_fiscal_accounts afa where 	afa.acc_type in ('E','R') and not exists (select null from general_ledger gl1 where gl1.account_key = afa.account_key and gl1.organization_key = afa.org_key and gl1.fiscal_month_key = afa.fiscal_month_key) ), totals as( select  x.account_key               account_key, x.org_key                   org_key, x.acc_type                      account_type, fm_next.fiscal_month_key    fiscal_month_key, x.fiscal_month_key          prev_fiscal_month_key, sum(amount) over( partition by x.account_key, x.org_key order by x.begin_date )                       amount, sum(amount) over( partition by x.account_key, x.org_key order by x.begin_date )                       amount_c, sum(local_amount) over( partition by x.account_key, x.org_key order by x.begin_date )                       local_amount, sum(local_amount) over( partition by x.account_key, x.org_key order by x.begin_date )                       local_amount_c, x.transaction_currency, x.local_currency from ( select gl.account_key          account_key, gl.organization_key     org_key, gl.fiscal_month_key     fiscal_month_key, max(fm.begin_date)           begin_date, max(fm.end_date)             end_date, sum(case    when a.type = 'A' then (gl.debit_amount - gl.credit_amount) when a.type = 'L' then (gl.credit_amount - gl.debit_amount) else 0 end) amount, sum(case    when a.type = 'A' then (gl.local_debit_amount - gl.local_credit_amount) when a.type = 'L' then (gl.local_credit_amount - gl.local_debit_amount) else 0 end) local_amount, max(gl.local_currency)       local_currency, max(gl.transaction_currency) transaction_currency, max(a.type) acc_type from general_ledger gl join fiscal_month   fm      on fm.fiscal_month_key = gl.fiscal_month_key join account        a       on a.account_key = gl.account_key where a.type in ('A','L') group by gl.account_key, gl.organization_key , gl.fiscal_month_key  union all  select afa.account_key          account_key, afa.org_key              org_key, afa.fiscal_month_key     fiscal_month_key, afa.begin_date           begin_date, afa.end_date             end_date, 0                        amount, 0                        local_amount, afa.local_currency       local_currency, afa.transaction_currency transaction_currency, afa.acc_type from all_fiscal_accounts afa where 	afa.acc_type in ('A','L') and not exists (select null from general_ledger gl1 where gl1.account_key = afa.account_key and gl1.organization_key = afa.org_key and gl1.fiscal_month_key = afa.fiscal_month_key) ) x  join fiscal_month   fm_next on fm_next.begin_date = x.end_date + INTERVAL '1' day  union all  select  x.account_key               account_key, x.org_key                   org_key, max(x.acc_type)             account_type, fm_next.fiscal_month_key    fiscal_month_key, x.fiscal_month_key          prev_fiscal_month_key, case when fm_next.period_number = 1 then 0 else sum(y.amount) end amount, sum(y.amount)               amount_c, case when fm_next.period_number = 1 then 0 else sum(y.local_amount) end local_amount, sum(y.local_amount)         local_amount_c, max(x.transaction_currency) transaction_currency, max(x.local_currency)       local_currency from re_accounts_cte x join re_accounts_cte y on x.account_key = y.account_key and x.org_key  = y.org_key and x.begin_date >= y.begin_date and x.fiscal_year_key = y.fiscal_year_key  join fiscal_month   fm_next on fm_next.begin_date = x.end_date + INTERVAL '1' day join fiscal_year    fy      on fy.fiscal_year_key = fm_next.fiscal_year_key group by x.account_key, x.org_key , fm_next.fiscal_month_key, fm_next.period_number, x.fiscal_month_key ) select x."General Ledger Key", x."Acct Key", x."Customer Key", x."Organization Key", x."Project Key", x."Person Key", x."Fiscal Month Key", x."Acct Code", x."Acct Description", x."Acct Type", x."Acct Type Order", x."Credit Amount", x."Customer/Vendor Code", x."Customer/Vendor Name", x."Debit Amount", x."GL Description", x."Doc Number", x."Doc Type", x."Doc Type Description", x."Doc Key", x."Fin Org Code", x."Fin Org Name", x."Fiscal Period", x."Post Date", x."Quantity", x."Transaction Date", x."Legal Entity Org Code", x."Legal Entity Org Name", x."Person First Name", x."Person Last Name", x."Person Middle Initial", x."Proj Code", x."Proj Org Code", x."Proj Org Name", x."Proj Owning Org Code", x."Proj Owning Org Name", x."Reference", x."BEGINNING_BALANCE", x."ENDING_BALANCE", x."Transaction Currency Code", x."Local Currency Code", x."Local Beginning Balance", x."Local Credit Amount", x."Local Debit Amount", x."Local Ending Balance" from ( select NULL 						as "General Ledger Key", t.account_key               as "Acct Key", NULL 						as "Customer Key", t.org_key         			as "Organization Key", NULL 						as "Project Key", NULL 						as "Person Key", fm_prev.fiscal_month_key 	as "Fiscal Month Key", a.account_code              as "Acct Code", a.description               as "Acct Description", case a.type when 'A' then 'Asset' when 'E' then 'Expense' when 'L' then 'Liability' when 'R' then 'Revenue' else          'Unknown Account Type' end                         as "Acct Type", case a.type when 'A' then 1 when 'L' then 2 when 'R' then 3 when 'E' then 4 end                         as "Acct Type Order", NULL 						as "Credit Amount", NULL 						as "Customer/Vendor Code", NULL 						as "Customer/Vendor Name", NULL 						as "Debit Amount", 'Calculated Balance'		as "GL Description", NULL 						as "Doc Number", NULL 						as "Doc Key", NULL 						as "Doc Type", NULL 						as "Doc Type Description", org.customer_code           as "Fin Org Code", org.customer_name           as "Fin Org Name", case when fm_prev.period_number < 10 then concat(concat(concat(fy.name,'-'),'0'),cast(fm_prev.period_number as varchar(4))) else concat(concat(fy.name,'-'),cast(fm_prev.period_number as varchar(4))) end 						as "Fiscal Period", NULL 						as "Post Date", NULL 						as "Quantity", NULL 						as "Transaction Date", le.customer_code            as "Legal Entity Org Code", le.customer_name            as "Legal Entity Org Name", NULL 						as "Person First Name", NULL 						as "Person Last Name", NULL 						as "Person Middle Initial", NULL 						as "Proj Code", NULL 						as "Proj Org Code", NULL 						as "Proj Org Name", NULL 						as "Proj Owning Org Code", NULL 						as "Proj Owning Org Name", NULL 						as "Reference", t_p.amount                  as "BEGINNING_BALANCE", t.amount                    as "ENDING_BALANCE", ccc.iso_currency_code       as "Transaction Currency Code", lcc.iso_currency_code       as "Local Currency Code", t_p.local_amount            as "Local Beginning Balance", NULL                        as "Local Credit Amount", NULL                        as "Local Debit Amount", t.local_amount              as "Local Ending Balance"  from totals t join totals 				t_p on t.account_key = t_p.account_key AND t.org_key = t_p.org_key and t.prev_fiscal_month_key = t_p.fiscal_month_key join account 				a  on a.account_key = t.account_key join customer 				org on org.customer_key = t.org_key join fiscal_month  			fm  on fm.fiscal_month_key = t.fiscal_month_key join fiscal_month           fm_prev on fm_prev.end_date = fm.begin_date - INTERVAL '1' day join fiscal_year   			fy on fy.fiscal_year_key = fm_prev.fiscal_year_key left outer join customer  	le  on le.customer_key = org.legal_entity_key join currency_code          ccc on ccc.currency_code_key = t.transaction_currency join currency_code          lcc on lcc.currency_code_key = t.local_currency   where       not (t_p.amount = 0 and t.amount = 0)  and fm.begin_date >= current_date - INTERVAL '3' year union all select gl.general_ledger_key       as "General Ledger Key", a.account_key               as "Acct Key", gl.customer_key             as "Customer Key", gl.organization_key         as "Organization Key", gl.project_key              as "Project Key", gl.person_key               as "Person Key", gl.fiscal_month_key         as "Fiscal Month Key", a.account_code              as "Acct Code", a.description               as "Acct Description", case a.type when 'A' then 'Asset' when 'E' then 'Expense' when 'L' then 'Liability' when 'R' then 'Revenue' else          'Unknown Account Type' end                         as "Acct Type", case a.type when 'A' then 1 when 'L' then 2 when 'R' then 3 when 'E' then 4 end                         as "Acct Type Order", gl.credit_amount            as "Credit Amount", cust.customer_code          as "Customer/Vendor Code", cust.customer_name          as "Customer/Vendor Name", gl.debit_amount             as "Debit Amount", gl.description              as "GL Description", gl.document_number          as "Doc Number", gl.general_ledger_key       as "Doc Key", case gl.feature when 0 then 'VI' when 1 then 'VP' when 2 then 'F2' when 3 then 'CP' when 4 then 'D' when 5 then 'JE' when 6 then 'BR' when 7 then 'CI' when 8 then 'LC' when 9 then 'EC' when 10 then 'FY' when 11 then 'AL' when 13 then 'FA' when 14 then 'PILOB' else 'Unknown Document Type' end                         as "Doc Type", case gl.feature when 0 then 'Vendor Invoice' when 1 then 'Vendor Payment' when 2 then 'Unknown Feature 2' when 3 then 'Customer Payment' when 4 then 'Deposit' when 5 then 'Journal Entry' when 6 then 'Billing and Revenue Post' when 7 then 'Invoice' when 8 then 'Labor Cost Post' when 9 then 'Expense Report Cost Post' when 10 then 'General Ledger Closing' when 11 then 'Cost Pool Post' when 13 then 'Fixed Asset Post' when 14 then 'Pay in Lieu of Benefits' else 'Unknown Document Type' end                         as "Doc Type Description", org.customer_code           as "Fin Org Code", org.customer_name           as "Fin Org Name", case when fm.period_number < 10 then concat(concat(concat(fy.name,'-'),'0'),cast(fm.period_number as varchar(4))) else concat(concat(fy.name,'-'),cast(fm.period_number as varchar(4))) end 						as "Fiscal Period", gl.post_date                as "Post Date", gl.quantity                 as "Quantity", gl.transaction_date         as "Transaction Date", le.customer_code            as "Legal Entity Org Code", le.customer_name            as "Legal Entity Org Name", pers.first_name             as "Person First Name", pers.last_name              as "Person Last Name", pers.middle_initial         as "Person Middle Initial", proj.project_code           as "Proj Code", porg.customer_code          as "Proj Org Code", porg.customer_name          as "Proj Org Name", pown.customer_code          as "Proj Owning Org Code", pown.customer_name          as "Proj Owning Org Name", gl.reference                as "Reference", null 						as "BEGINNING_BALANCE", null 						as "ENDING_BALANCE", ccc.iso_currency_code       as "Transaction Currency Code", lcc.iso_currency_code       as "Local Currency Code", null                        as "Local Beginning Balance", gl.local_credit_amount      as "Local Credit Amount", gl.local_debit_amount       as "Local Debit Amount", null                        as "Local Ending Balance" from general_ledger gl join account              a     on a.account_key = gl.account_key join customer             org   on org.customer_key = gl.organization_key left outer join customer  le    on le.customer_key = org.legal_entity_key left outer join customer  cust  on cust.customer_key = gl.customer_key join fiscal_month         fm    on fm.fiscal_month_key = gl.fiscal_month_key join fiscal_year          fy    on fy.fiscal_year_key = fm.fiscal_year_key left outer join project   proj  on proj.project_key = gl.project_key left outer join customer  porg  on porg.customer_key = proj.customer_key left outer join customer  pown  on pown.customer_key = proj.owning_customer_key left outer join person    pers  on pers.person_key = gl.person_key join currency_code        ccc   on ccc.currency_code_key = gl.transaction_currency join currency_code        lcc   on lcc.currency_code_key = gl.local_currency where fm.begin_date >= current_date - INTERVAL '3' year ) x where  (exists (select null from member where person_key = '3896' and role_key = 1)) OR (exists (select null from org_access_person where person_key = '3896' and role_key = 33 and global_access = 'Y')) OR (x."Organization Key" in (   select customer_key from access_customer_view v join org_access_person oap on oap.org_access_person_key = v.org_access_person_key where oap.person_key = '3896' and oap.role_key = 33 and oap.access_type = 2 and legal_entity_ind = 'N'  UNION ALL  select customer_key from customer cust where cust.legal_entity_key in ( select customer_key from access_customer_view v join org_access_person oap on oap.org_access_person_key = v.org_access_person_key where oap.person_key = '3896' and oap.role_key = 33 and oap.access_type = 2 and legal_entity_ind = 'Y' ) ) )
-) wrE19
-WHERE 
-	(wrE19."Fin Org Code" IN ('1.01.03.03.02MIR-DHS','1.01.03.01.02PAN-DHS','1.01.03.00.02.02-DHSDIR','1.01.03.00.02.01-DHSLEAD','1.01.03.00.02-DHS') AND wrE19."Acct Description" IN ('Direct - IFF (Non-Billed)','Direct - Proj Mgmt Bns','Direct Consultant Labor (1099)','Direct Labor','Direct Subcontractor Labor','Other Direct Costs (ODCs)'))
-	-- AND wrE19."Fiscal Period" = 'FY2025-05' 
+    SUM(wrE19."Debit Amount") AS "Debit Amount",
+    SUM(wrE19."Credit Amount") AS "credit Amount",
+    MAX(wrE19."General Ledger Key") AS "General Ledger Key"
+FROM (
+    WITH all_fiscal_accounts AS (
+        SELECT 
+            gl.account_key AS account_key, 
+            gl.organization_key AS org_key, 
+            fm.fiscal_month_key AS fiscal_month_key, 
+            fm.fiscal_year_key AS fiscal_year_key, 
+            fm.begin_date AS begin_date, 
+            fm.end_date AS end_date, 
+            0 AS amount, 
+            a.type AS acc_type, 
+            gl.transaction_currency AS transaction_currency, 
+            gl.local_currency AS local_currency
+        FROM (
+            SELECT DISTINCT account_key, organization_key, transaction_currency, local_currency 
+            FROM [dbo].["aretum"."general_ledger"]
+        ) gl
+        CROSS JOIN [dbo].["aretum"."fiscal_month"] fm
+        JOIN [dbo].["aretum"."account"] a ON a.account_key = gl.account_key
+        WHERE fm.begin_date >= DATEADD(year, -4, GETDATE())
+    ),
+    re_accounts_cte AS (
+        SELECT 
+            gl.account_key AS account_key, 
+            gl.organization_key AS org_key, 
+            gl.fiscal_month_key AS fiscal_month_key, 
+            MAX(fm.fiscal_year_key) AS fiscal_year_key, 
+            MAX(fm.begin_date) AS begin_date, 
+            MAX(fm.end_date) AS end_date,
+            SUM(
+                CASE    
+                    WHEN a.type = 'E' THEN 
+                        CAST(gl.debit_amount AS DECIMAL(18,2)) - CAST(gl.credit_amount AS DECIMAL(18,2))
+                    WHEN a.type = 'R' THEN 
+                        CAST(gl.credit_amount AS DECIMAL(18,2)) - CAST(gl.debit_amount AS DECIMAL(18,2))
+                    ELSE 0 
+                END
+            ) AS amount,
+            SUM(
+                CASE    
+                    WHEN a.type = 'E' THEN 
+                        CAST(gl.local_debit_amount AS DECIMAL(18,2)) - CAST(gl.local_credit_amount AS DECIMAL(18,2))
+                    WHEN a.type = 'R' THEN 
+                        CAST(gl.local_credit_amount AS DECIMAL(18,2)) - CAST(gl.local_debit_amount AS DECIMAL(18,2))
+                    ELSE 0 
+                END
+            ) AS local_amount,
+            MAX(gl.transaction_currency) AS transaction_currency, 
+            MAX(gl.local_currency) AS local_currency, 
+            MAX(a.type) AS acc_type
+        FROM [dbo].["aretum"."general_ledger"] gl
+        JOIN [dbo].["aretum"."fiscal_month"] fm ON fm.fiscal_month_key = gl.fiscal_month_key
+        JOIN [dbo].["aretum"."account"] a ON a.account_key = gl.account_key
+        WHERE a.type IN ('E','R')
+        GROUP BY gl.account_key, gl.organization_key, gl.fiscal_month_key  
+        UNION ALL
+        SELECT 
+            afa.account_key, 
+            afa.org_key, 
+            afa.fiscal_month_key, 
+            afa.fiscal_year_key, 
+            afa.begin_date, 
+            afa.end_date, 
+            0 AS amount, 
+            0 AS local_amount, 
+            afa.transaction_currency, 
+            afa.local_currency, 
+            afa.acc_type
+        FROM all_fiscal_accounts afa
+        WHERE afa.acc_type IN ('E','R')
+          AND NOT EXISTS (
+            SELECT 1 
+            FROM [dbo].["aretum"."general_ledger"] gl1
+            WHERE gl1.account_key = afa.account_key 
+              AND gl1.organization_key = afa.org_key 
+              AND gl1.fiscal_month_key = afa.fiscal_month_key
+          )
+    ),
+    totals AS (
+        SELECT  
+            x.account_key, 
+            x.org_key, 
+            x.acc_type AS account_type, 
+            fm_next.fiscal_month_key, 
+            x.fiscal_month_key AS prev_fiscal_month_key,
+            SUM(x.amount) OVER (PARTITION BY x.account_key, x.org_key ORDER BY x.begin_date) AS amount,
+            SUM(x.amount) OVER (PARTITION BY x.account_key, x.org_key ORDER BY x.begin_date) AS amount_c,
+            SUM(x.local_amount) OVER (PARTITION BY x.account_key, x.org_key ORDER BY x.begin_date) AS local_amount,
+            SUM(x.local_amount) OVER (PARTITION BY x.account_key, x.org_key ORDER BY x.begin_date) AS local_amount_c,
+            x.transaction_currency,
+            x.local_currency
+        FROM (
+            SELECT 
+                gl.account_key, 
+                gl.organization_key AS org_key, 
+                gl.fiscal_month_key, 
+                MAX(fm.begin_date) AS begin_date, 
+                MAX(fm.end_date) AS end_date,
+                SUM(
+                    CASE    
+                        WHEN a.type = 'A' THEN 
+                            CAST(gl.debit_amount AS DECIMAL(18,2)) - CAST(gl.credit_amount AS DECIMAL(18,2))
+                        WHEN a.type = 'L' THEN 
+                            CAST(gl.credit_amount AS DECIMAL(18,2)) - CAST(gl.debit_amount AS DECIMAL(18,2))
+                        ELSE 0 
+                    END
+                ) AS amount,
+                SUM(
+                    CASE    
+                        WHEN a.type = 'A' THEN 
+                            CAST(gl.local_debit_amount AS DECIMAL(18,2)) - CAST(gl.local_credit_amount AS DECIMAL(18,2))
+                        WHEN a.type = 'L' THEN 
+                            CAST(gl.local_credit_amount AS DECIMAL(18,2)) - CAST(gl.local_debit_amount AS DECIMAL(18,2))
+                        ELSE 0 
+                    END
+                ) AS local_amount,
+                MAX(gl.local_currency) AS local_currency,
+                MAX(gl.transaction_currency) AS transaction_currency,
+                MAX(a.type) AS acc_type
+            FROM [dbo].["aretum"."general_ledger"] gl
+            JOIN [dbo].["aretum"."fiscal_month"] fm ON fm.fiscal_month_key = gl.fiscal_month_key
+            JOIN [dbo].["aretum"."account"] a ON a.account_key = gl.account_key
+            WHERE a.type IN ('A','L')
+            GROUP BY gl.account_key, gl.organization_key, gl.fiscal_month_key
+            UNION ALL
+            SELECT 
+                afa.account_key, 
+                afa.org_key, 
+                afa.fiscal_month_key, 
+                afa.begin_date, 
+                afa.end_date, 
+                0 AS amount, 
+                0 AS local_amount, 
+                afa.local_currency, 
+                afa.transaction_currency, 
+                afa.acc_type
+            FROM all_fiscal_accounts afa
+            WHERE afa.acc_type IN ('A','L')
+              AND NOT EXISTS (
+                SELECT 1
+                FROM [dbo].["aretum"."general_ledger"] gl1
+                WHERE gl1.account_key = afa.account_key 
+                  AND gl1.organization_key = afa.org_key 
+                  AND gl1.fiscal_month_key = afa.fiscal_month_key
+              )
+        ) x  
+        JOIN [dbo].["aretum"."fiscal_month"] fm_next ON fm_next.begin_date = DATEADD(day, 1, x.end_date)
+        UNION ALL
+        SELECT  
+            x.account_key, 
+            x.org_key, 
+            MAX(x.acc_type) AS account_type, 
+            fm_next.fiscal_month_key, 
+            x.fiscal_month_key AS prev_fiscal_month_key,
+            CASE WHEN fm_next.period_number = 1 THEN 0 ELSE SUM(y.amount) END AS amount,
+            SUM(y.amount) AS amount_c,
+            CASE WHEN fm_next.period_number = 1 THEN 0 ELSE SUM(y.local_amount) END AS local_amount,
+            SUM(y.local_amount) AS local_amount_c,
+            MAX(x.transaction_currency) AS transaction_currency,
+            MAX(x.local_currency) AS local_currency
+        FROM re_accounts_cte x
+        JOIN re_accounts_cte y ON x.account_key = y.account_key 
+            AND x.org_key  = y.org_key 
+            AND x.begin_date >= y.begin_date 
+            AND x.fiscal_year_key = y.fiscal_year_key
+        JOIN [dbo].["aretum"."fiscal_month"] fm_next ON fm_next.begin_date = DATEADD(day, 1, x.end_date)
+        JOIN [dbo].["aretum"."fiscal_year"] fy ON fy.fiscal_year_key = fm_next.fiscal_year_key
+        GROUP BY x.account_key, x.org_key, fm_next.fiscal_month_key, fm_next.period_number, x.fiscal_month_key
+    )
+    SELECT 
+        x."General Ledger Key", x."Acct Key", x."Customer Key", x."Organization Key", x."Project Key", x."Person Key", x."Fiscal Month Key", x."Acct Code", x."Acct Description", x."Acct Type", x."Acct Type Order", x."Credit Amount", x."Customer/Vendor Code", x."Customer/Vendor Name", x."Debit Amount", x."GL Description", x."Doc Number", x."Doc Type", x."Doc Type Description", x."Doc Key", x."Fin Org Code", x."Fin Org Name", x."Fiscal Period", x."Post Date", x."Quantity", x."Transaction Date", x."Legal Entity Org Code", x."Legal Entity Org Name", x."Person First Name", x."Person Last Name", x."Person Middle Initial", x."Proj Code", x."Proj Org Code", x."Proj Org Name", x."Proj Owning Org Code", x."Proj Owning Org Name", x."Reference", x."BEGINNING_BALANCE", x."ENDING_BALANCE", x."Transaction Currency Code", x."Local Currency Code", x."Local Beginning Balance", x."Local Credit Amount", x."Local Debit Amount", x."Local Ending Balance"
+    FROM (
+        SELECT 
+            NULL AS "General Ledger Key", 
+            t.account_key AS "Acct Key", 
+            NULL AS "Customer Key", 
+            t.org_key AS "Organization Key", 
+            NULL AS "Project Key", 
+            NULL AS "Person Key", 
+            fm_prev.fiscal_month_key AS "Fiscal Month Key", 
+            a.account_code AS "Acct Code", 
+            a.description AS "Acct Description", 
+            CASE a.type WHEN 'A' THEN 'Asset' WHEN 'E' THEN 'Expense' WHEN 'L' THEN 'Liability' WHEN 'R' THEN 'Revenue' ELSE 'Unknown Account Type' END AS "Acct Type",
+            CASE a.type WHEN 'A' THEN 1 WHEN 'L' THEN 2 WHEN 'R' THEN 3 WHEN 'E' THEN 4 END AS "Acct Type Order",
+            NULL AS "Credit Amount",
+            NULL AS "Customer/Vendor Code",
+            NULL AS "Customer/Vendor Name",
+            NULL AS "Debit Amount",
+            'Calculated Balance' AS "GL Description",
+            NULL AS "Doc Number",
+            NULL AS "Doc Key",
+            NULL AS "Doc Type",
+            NULL AS "Doc Type Description",
+            org.customer_code AS "Fin Org Code",
+            org.customer_name AS "Fin Org Name",
+            CASE WHEN fm_prev.period_number < 10 THEN CONCAT(CONCAT(CONCAT(fy.name,'-'),'0'),CAST(fm_prev.period_number AS VARCHAR(4))) ELSE CONCAT(CONCAT(fy.name,'-'),CAST(fm_prev.period_number AS VARCHAR(4))) END AS "Fiscal Period",
+            NULL AS "Post Date",
+            NULL AS "Quantity",
+            NULL AS "Transaction Date",
+            le.customer_code AS "Legal Entity Org Code",
+            le.customer_name AS "Legal Entity Org Name",
+            NULL AS "Person First Name",
+            NULL AS "Person Last Name",
+            NULL AS "Person Middle Initial",
+            NULL AS "Proj Code",
+            NULL AS "Proj Org Code",
+            NULL AS "Proj Org Name",
+            NULL AS "Proj Owning Org Code",
+            NULL AS "Proj Owning Org Name",
+            NULL AS "Reference",
+            t_p.amount AS "BEGINNING_BALANCE",
+            t.amount AS "ENDING_BALANCE",
+            ccc.iso_currency_code AS "Transaction Currency Code",
+            lcc.iso_currency_code AS "Local Currency Code",
+            t_p.local_amount AS "Local Beginning Balance",
+            NULL AS "Local Credit Amount",
+            NULL AS "Local Debit Amount",
+            t.local_amount AS "Local Ending Balance"
+        FROM totals t
+        JOIN totals t_p ON t.account_key = t_p.account_key AND t.org_key = t_p.org_key AND t.prev_fiscal_month_key = t_p.fiscal_month_key
+        JOIN [dbo].["aretum"."account"] a ON a.account_key = t.account_key
+        JOIN [dbo].["aretum"."customer"] org ON org.customer_key = t.org_key
+        JOIN [dbo].["aretum"."fiscal_month"] fm ON fm.fiscal_month_key = t.fiscal_month_key
+        JOIN [dbo].["aretum"."fiscal_month"] fm_prev ON fm_prev.end_date = DATEADD(day, -1, fm.begin_date)
+        JOIN [dbo].["aretum"."fiscal_year"] fy ON fy.fiscal_year_key = fm_prev.fiscal_year_key
+        LEFT OUTER JOIN [dbo].["aretum"."customer"] le ON le.customer_key = org.legal_entity_key
+        JOIN [dbo].["aretum"."currency_code"] ccc ON ccc.currency_code_key = t.transaction_currency
+        JOIN [dbo].["aretum"."currency_code"] lcc ON lcc.currency_code_key = t.local_currency
+        WHERE NOT (t_p.amount = 0 AND t.amount = 0)
+          AND fm.begin_date >= DATEADD(year, -3, GETDATE())
+        UNION ALL
+        SELECT 
+            gl.general_ledger_key AS "General Ledger Key", 
+            a.account_key AS "Acct Key", 
+            gl.customer_key AS "Customer Key", 
+            gl.organization_key AS "Organization Key", 
+            gl.project_key AS "Project Key", 
+            gl.person_key AS "Person Key", 
+            gl.fiscal_month_key AS "Fiscal Month Key", 
+            a.account_code AS "Acct Code", 
+            a.description AS "Acct Description", 
+            CASE a.type WHEN 'A' THEN 'Asset' WHEN 'E' THEN 'Expense' WHEN 'L' THEN 'Liability' WHEN 'R' THEN 'Revenue' ELSE 'Unknown Account Type' END AS "Acct Type",
+            CASE a.type WHEN 'A' THEN 1 WHEN 'L' THEN 2 WHEN 'R' THEN 3 WHEN 'E' THEN 4 END AS "Acct Type Order",
+            gl.credit_amount AS "Credit Amount",
+            cust.customer_code AS "Customer/Vendor Code",
+            cust.customer_name AS "Customer/Vendor Name",
+            gl.debit_amount AS "Debit Amount",
+            gl.description AS "GL Description",
+            gl.document_number AS "Doc Number",
+            gl.general_ledger_key AS "Doc Key",
+            CASE gl.feature 
+                WHEN 0 THEN 'VI' WHEN 1 THEN 'VP' WHEN 2 THEN 'F2' WHEN 3 THEN 'CP' WHEN 4 THEN 'D'
+                WHEN 5 THEN 'JE' WHEN 6 THEN 'BR' WHEN 7 THEN 'CI' WHEN 8 THEN 'LC' WHEN 9 THEN 'EC'
+                WHEN 10 THEN 'FY' WHEN 11 THEN 'AL' WHEN 13 THEN 'FA' WHEN 14 THEN 'PILOB'
+                ELSE 'Unknown Document Type'
+            END AS "Doc Type",
+            CASE gl.feature 
+                WHEN 0 THEN 'Vendor Invoice' WHEN 1 THEN 'Vendor Payment' WHEN 2 THEN 'Unknown Feature 2'
+                WHEN 3 THEN 'Customer Payment' WHEN 4 THEN 'Deposit' WHEN 5 THEN 'Journal Entry'
+                WHEN 6 THEN 'Billing and Revenue Post' WHEN 7 THEN 'Invoice' WHEN 8 THEN 'Labor Cost Post'
+                WHEN 9 THEN 'Expense Report Cost Post' WHEN 10 THEN 'General Ledger Closing'
+                WHEN 11 THEN 'Cost Pool Post' WHEN 13 THEN 'Fixed Asset Post' WHEN 14 THEN 'Pay in Lieu of Benefits'
+                ELSE 'Unknown Document Type'
+            END AS "Doc Type Description",
+            org.customer_code AS "Fin Org Code",
+            org.customer_name AS "Fin Org Name",
+            CASE WHEN fm.period_number < 10 THEN CONCAT(CONCAT(CONCAT(fy.name,'-'),'0'),CAST(fm.period_number AS VARCHAR(4))) ELSE CONCAT(CONCAT(fy.name,'-'),CAST(fm.period_number AS VARCHAR(4))) END AS "Fiscal Period",
+            gl.post_date AS "Post Date",
+            gl.quantity AS "Quantity",
+            gl.transaction_date AS "Transaction Date",
+            le.customer_code AS "Legal Entity Org Code",
+            le.customer_name AS "Legal Entity Org Name",
+            pers.first_name AS "Person First Name",
+            pers.last_name AS "Person Last Name",
+            pers.middle_initial AS "Person Middle Initial",
+            proj.project_code AS "Proj Code",
+            porg.customer_code AS "Proj Org Code",
+            porg.customer_name AS "Proj Org Name",
+            pown.customer_code AS "Proj Owning Org Code",
+            pown.customer_name AS "Proj Owning Org Name",
+            gl.reference AS "Reference",
+            NULL AS "BEGINNING_BALANCE",
+            NULL AS "ENDING_BALANCE",
+            ccc.iso_currency_code AS "Transaction Currency Code",
+            lcc.iso_currency_code AS "Local Currency Code",
+            NULL AS "Local Beginning Balance",
+            gl.local_credit_amount AS "Local Credit Amount",
+            gl.local_debit_amount AS "Local Debit Amount",
+            NULL AS "Local Ending Balance"
+        FROM [dbo].["aretum"."general_ledger"] gl
+        JOIN [dbo].["aretum"."account"] a ON a.account_key = gl.account_key
+        JOIN [dbo].["aretum"."customer"] org ON org.customer_key = gl.organization_key
+        LEFT OUTER JOIN [dbo].["aretum"."customer"] le ON le.customer_key = org.legal_entity_key
+        LEFT OUTER JOIN [dbo].["aretum"."customer"] cust ON cust.customer_key = gl.customer_key
+        JOIN [dbo].["aretum"."fiscal_month"] fm ON fm.fiscal_month_key = gl.fiscal_month_key
+        JOIN [dbo].["aretum"."fiscal_year"] fy ON fy.fiscal_year_key = fm.fiscal_year_key
+        LEFT OUTER JOIN [dbo].["aretum"."project"] proj ON proj.project_key = gl.project_key
+        LEFT OUTER JOIN [dbo].["aretum"."customer"] porg ON porg.customer_key = proj.customer
