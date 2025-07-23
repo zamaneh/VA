@@ -62,7 +62,7 @@ FROM (
 			'Actual' AS act_budname,
 			CASE a.type WHEN 'R' THEN (gl.credit_amount - gl.debit_amount) ELSE (gl.debit_amount - gl.credit_amount) END AS actual,
 			CASE a.type WHEN 'R' THEN (gl.local_credit_amount - gl.local_debit_amount) ELSE (gl.local_debit_amount - gl.local_credit_amount) END AS local_actual,
-			NULL AS budget,
+			0 AS budget,
 			(gl.credit_amount - gl.debit_amount) AS net_amount,
 			(gl.local_credit_amount - gl.local_debit_amount) AS local_net_amount,
 			cc.iso_currency_code AS local_currency_code
@@ -74,7 +74,9 @@ FROM (
 		JOIN [dbo].["aretum"."fiscal_year"] fy ON fy.fiscal_year_key = fm.fiscal_year_key
 		JOIN [dbo].["aretum"."currency_code"] cc ON cc.currency_code_key = gl.local_currency
 		WHERE a.type IN ('R','E')
-			AND fm.begin_date >= DATEADD(month, -36, CAST(GETDATE() AS date))
+			AND fm.begin_date >= DATEADD(
+                     month, -36,
+                     DATEFROMPARTS(YEAR(GETDATE()), MONTH(GETDATE()), 1))
 		
 		UNION ALL
 		
@@ -93,8 +95,8 @@ FROM (
 			cle.customer_code AS le_org_code,
 			cle.customer_name AS le_org_name,
 			bn.budget_name AS act_budname,
-			NULL AS actual,
-			NULL AS local_actual,
+			0 AS actual,
+			0 AS local_actual,
 			bd.amount AS budget,
 			CASE WHEN a.type = 'R' THEN bd.amount ELSE (bd.amount * (-1)) END AS net_amount,
 			CASE WHEN a.type = 'R' THEN bd.amount ELSE (bd.amount * (-1)) END AS local_net_amount,
@@ -110,7 +112,9 @@ FROM (
 		LEFT JOIN [dbo].["aretum"."customer"] cle ON cle.customer_key = c.legal_entity_key
 		LEFT JOIN [dbo].["aretum"."currency_code"] cc ON cc.currency_code_key = cle.currency_code_key
 		WHERE b.type = 'I'
-			AND fm.begin_date >= DATEADD(month, -36, CAST(GETDATE() AS date))
+			AND fm.begin_date >= DATEADD(
+                     month, -36,
+                     DATEFROMPARTS(YEAR(GETDATE()), MONTH(GETDATE()), 1))
 	) x
 	WHERE 
 		(EXISTS (SELECT 1 FROM [dbo].["aretum"."member"] WHERE person_key = 3896 AND role_key = 1))
