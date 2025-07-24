@@ -1,6 +1,7 @@
 CREATE VIEW [dbo].[IncomeStatement]
 AS
 SELECT 
+ 	wrE19.[Budget] AS "Budget",
 	wrE19.[Fiscal Period] AS "Fiscal Period",
 	wrE20.[Acct Fin Lv2 Code] AS "Acct Fin Lv2 Code",
 	wrE20.[Acct Fin Lv2 Name] AS "Acct Fin Lv2 Name",
